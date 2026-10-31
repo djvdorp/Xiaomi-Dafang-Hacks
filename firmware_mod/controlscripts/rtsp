@@ -15,6 +15,22 @@ if [ -f /system/sdcard/config/rtspserver.conf ]; then
 fi
 RTSP_BINARY=${RTSP_BINARY:-$STOCK_RTSP_BINARY}
 RTSP_LIBDIR=${RTSP_LIBDIR:-$STOCK_RTSP_LIBDIR}
+RTSPWATCHDOG=${RTSPWATCHDOG:-true}
+RTSPWATCHDOG_INTERVAL=${RTSPWATCHDOG_INTERVAL:-60}
+RTSPWATCHDOG_TIMEOUT=${RTSPWATCHDOG_TIMEOUT:-15}
+RTSPWATCHDOG_MAX_RESTARTS=${RTSPWATCHDOG_MAX_RESTARTS:-3}
+case "$RTSPWATCHDOG_INTERVAL" in ''|0|*[!0-9]*) RTSPWATCHDOG_INTERVAL=60 ;; esac
+case "$RTSPWATCHDOG_TIMEOUT" in ''|0|*[!0-9]*) RTSPWATCHDOG_TIMEOUT=15 ;; esac
+case "$RTSPWATCHDOG_MAX_RESTARTS" in ''|*[!0-9]*) RTSPWATCHDOG_MAX_RESTARTS=3 ;; esac
+RTSPWATCHDOG_PIDFILE="/run/rtsp-watchdog.pid"
+RTSPWATCHDOG_AVCONV="/system/sdcard/bin/avconv"
+RTSPWATCHDOG_OUTPUT="/tmp/rtsp-watchdog-$$.jpg"
+RTSPWATCHDOG_CONTROL="/system/sdcard/controlscripts/rtsp"
+RTSPWATCHDOG_LOG="/system/sdcard/log/startup.log"
+RTSP_PIDFILE="$PIDFILE"
+PORT=${PORT:-8554}
+USERNAME=${USERNAME:-}
+USERPASSWORD=${USERPASSWORD:-}
 
 if [ "$LOG" != true ] ; then
   LOGPATH="/dev/null"
@@ -112,6 +128,7 @@ start()
 	echo "$RTSP_BINARY -f$CODEC $RTSPOPTS  $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST" >> "$LOGPATH"
 	"$RTSP_BINARY" -f$CODEC $RTSPOPTS  $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST 2>> "$LOGPATH" >> "$LOGPATH" &
 	echo "$!" > "$PIDFILE"
+	start_watchdog
   fi
 }
 
@@ -121,8 +138,25 @@ stop_dependents()
 	/system/sdcard/controlscripts/recording stop
 }
 
+start_watchdog()
+{
+	[ "$RTSPWATCHDOG" = true ] || return 0
+	rtsp_watchdog_start "$RTSPWATCHDOG_PIDFILE" "$0"
+}
+
+stop_watchdog()
+{
+	rtsp_watchdog_stop "$RTSPWATCHDOG_PIDFILE"
+}
+
+watchdog()
+{
+	rtsp_watchdog_loop
+}
+
 stop()
 {
+	stop_watchdog
   pid="$(cat "$PIDFILE" 2>/dev/null)"
   if [ "$pid" ]; then
 	stop_dependents
@@ -134,7 +168,7 @@ stop()
 if [ $# -eq 0 ]; then
   start
 else
-  case $1 in start|stop|status)
+  case $1 in start|stop|status|watchdog)
 	$1
 	;;
   esac

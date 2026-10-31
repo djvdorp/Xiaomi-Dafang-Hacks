@@ -78,6 +78,88 @@ select_rtsp_binary(){
 	[ -x "$RTSP_BINARY" ] && [ -d "$RTSP_LIBDIR" ]
 }
 
+rtsp_watchdog_probe(){
+	local url="rtsp://127.0.0.1:$PORT/unicast"
+	rm -f "$RTSPWATCHDOG_OUTPUT"
+	if [ -n "$USERNAME" ]; then
+		# shortcut: avconv takes RTSP auth in URL arguments; replace if untrusted local users are added.
+		url="rtsp://$USERNAME:$USERPASSWORD@127.0.0.1:$PORT/unicast"
+	fi
+	timeout "$RTSPWATCHDOG_TIMEOUT" "$RTSPWATCHDOG_AVCONV" -loglevel error -rtsp_transport tcp -i "$url" -vframes 1 -f image2 -y "$RTSPWATCHDOG_OUTPUT" >/dev/null 2>&1 || {
+		rm -f "$RTSPWATCHDOG_OUTPUT"
+		return 1
+	}
+	if [ -s "$RTSPWATCHDOG_OUTPUT" ]; then
+		rm -f "$RTSPWATCHDOG_OUTPUT"
+		return 0
+	fi
+	rm -f "$RTSPWATCHDOG_OUTPUT"
+	return 1
+}
+
+rtsp_watchdog_restart(){
+	local server_pid attempts
+	server_pid=$(cat "$RTSP_PIDFILE" 2>/dev/null)
+	if [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; then
+		kill "$server_pid" 2>/dev/null || true
+		attempts=0
+		while kill -0 "$server_pid" 2>/dev/null; do
+			if [ "$attempts" -ge 5 ]; then
+				echo "RTSP watchdog: PID $server_pid did not stop; skipping restart" >> "$RTSPWATCHDOG_LOG"
+				return 1
+			fi
+			sleep 1
+			attempts=$((attempts + 1))
+		done
+	fi
+	if [ -n "${RTSPWATCHDOG_PIDFILE:-}" ] && [ "$(cat "$RTSPWATCHDOG_PIDFILE" 2>/dev/null)" != "$$" ]; then
+		return 0
+	fi
+	rm -f "$RTSP_PIDFILE"
+	"$RTSPWATCHDOG_CONTROL" start >> "$RTSPWATCHDOG_LOG" 2>&1
+}
+
+rtsp_watchdog_start(){
+	local pidfile="$1"
+	local control_script="$2"
+	local watchdog_pid
+	watchdog_pid=$(cat "$pidfile" 2>/dev/null)
+	if [ -n "$watchdog_pid" ] && kill -0 "$watchdog_pid" 2>/dev/null; then
+		return 0
+	fi
+	rm -f "$pidfile"
+	"$control_script" watchdog >/dev/null 2>&1 &
+	echo "$!" > "$pidfile"
+}
+
+rtsp_watchdog_stop(){
+	local pidfile="$1"
+	local watchdog_pid
+	watchdog_pid=$(cat "$pidfile" 2>/dev/null)
+	if [ -n "$watchdog_pid" ]; then
+		rm -f "$pidfile"
+		kill "$watchdog_pid" 2>/dev/null || true
+	fi
+}
+
+rtsp_watchdog_loop(){
+	local restarts=0
+	while sleep "$RTSPWATCHDOG_INTERVAL"; do
+		if ! rtsp_watchdog_probe; then
+			if [ -n "${RTSPWATCHDOG_PIDFILE:-}" ] && [ "$(cat "$RTSPWATCHDOG_PIDFILE" 2>/dev/null)" != "$$" ]; then
+				return 0
+			fi
+			if [ "$restarts" -ge "$RTSPWATCHDOG_MAX_RESTARTS" ]; then
+				echo "RTSP watchdog: retry limit ($RTSPWATCHDOG_MAX_RESTARTS) reached after failed video probe" >> "$RTSPWATCHDOG_LOG"
+				return 0
+			fi
+			restarts=$((restarts + 1))
+			echo "RTSP watchdog: video probe failed; restart $restarts/$RTSPWATCHDOG_MAX_RESTARTS" >> "$RTSPWATCHDOG_LOG"
+			rtsp_watchdog_restart || echo "RTSP watchdog: server restart failed" >> "$RTSPWATCHDOG_LOG"
+		fi
+	done
+}
+
 # Initialize  gpio pin
 init_gpio(){
   GPIOPIN=$1

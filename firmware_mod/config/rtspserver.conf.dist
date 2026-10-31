@@ -17,6 +17,12 @@ PORT=8554
 RTSP_BINARY="/system/sdcard/bin/v4l2rtspserver-master"
 RTSP_LIBDIR="/system/sdcard/lib"
 
+# Restart RTSP after video stops producing decodable frames; retries are per watchdog process.
+RTSPWATCHDOG=true
+RTSPWATCHDOG_INTERVAL=60
+RTSPWATCHDOG_TIMEOUT=15
+RTSPWATCHDOG_MAX_RESTARTS=3
+
 USERNAME=
 USERPASSWORD=
 

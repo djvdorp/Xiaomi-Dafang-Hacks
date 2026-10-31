@@ -48,6 +48,10 @@ reboot
 
 If this file exists the run.sh won't start the WIFI driver but will instead load the usb ethernet driver. Currently only the asix.ko driver is supported but others can be built.
 
+## How can I test the experimental Dafang Wi-Fi driver?
+
+The stock driver is used by default. To try the separately staged candidate, set `WIFI_DRIVER=candidate` in `/system/sdcard/config/wifi-driver.conf` and reboot. If it is missing or fails to load, startup falls back to the stock driver. Set `WIFI_DRIVER=stock` and reboot to restore the default.
+
 ## Which Features does the CFW contain?
 
 - Full working RTSP with H264/MJPEG. Based on <https://github.com/mpromonet/v4l2rtspserver>

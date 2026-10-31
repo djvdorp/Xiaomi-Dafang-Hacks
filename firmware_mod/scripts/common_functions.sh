@@ -26,6 +26,42 @@ detect_model(){
 	echo "Wyzecam V2"
   fi
 }
+
+load_wifi_driver(){
+	local mode="$1"
+	local mac="$2"
+	local stock="$3"
+	local candidate="$4"
+	local selected="$stock"
+
+	if [ "$mode" = candidate ]; then
+		if [ -f "$candidate" ]; then
+			selected="$candidate"
+		else
+			echo "WIFI_DRIVER: candidate missing; falling back to stock" >> "$LOGPATH"
+		fi
+	elif [ -n "$mode" ] && [ "$mode" != stock ]; then
+		echo "WIFI_DRIVER: unknown mode '$mode'; using stock" >> "$LOGPATH"
+	fi
+
+	echo "WIFI_DRIVER: trying $selected" >> "$LOGPATH"
+	if [ -f "$selected" ] && insmod "$selected" rtw_initmac="$mac"; then
+		echo "WIFI_DRIVER: loaded $selected" >> "$LOGPATH"
+		return 0
+	fi
+
+	if [ "$selected" != "$stock" ]; then
+		echo "WIFI_DRIVER: candidate load failed; trying stock once" >> "$LOGPATH"
+		if [ -f "$stock" ] && insmod "$stock" rtw_initmac="$mac"; then
+			echo "WIFI_DRIVER: loaded stock driver $stock" >> "$LOGPATH"
+			return 0
+		fi
+	fi
+
+	echo "WIFI_DRIVER: failed to load a driver" >> "$LOGPATH"
+	return 1
+}
+
 # Initialize  gpio pin
 init_gpio(){
   GPIOPIN=$1

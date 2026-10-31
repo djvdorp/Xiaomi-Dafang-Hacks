@@ -1,0 +1,2 @@
+# Dafang Wi-Fi driver selection. Candidate is experimental; stock stays default.
+WIFI_DRIVER=stock

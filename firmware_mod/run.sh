@@ -124,7 +124,14 @@ else
   MAC=$(get_wifi_mac)
   if [ -f /driver/8189es.ko ]; then
     # Its a DaFang
-    insmod /driver/8189es.ko rtw_initmac="$MAC"
+    if [ ! -f "$CONFIGPATH/wifi-driver.conf" ]; then
+      cp "$CONFIGPATH/wifi-driver.conf.dist" "$CONFIGPATH/wifi-driver.conf"
+    fi
+    WIFI_DRIVER=stock
+    if [ -f "$CONFIGPATH/wifi-driver.conf" ]; then
+      . "$CONFIGPATH/wifi-driver.conf"
+    fi
+    load_wifi_driver "${WIFI_DRIVER:-stock}" "$MAC" /driver/8189es.ko /system/sdcard/driver/8189es-candidate.ko || exit 1
   elif [ -f /driver/8189fs.ko ]; then
     # Its a XiaoFang T20
     insmod /driver/8189fs.ko rtw_initmac="$MAC"

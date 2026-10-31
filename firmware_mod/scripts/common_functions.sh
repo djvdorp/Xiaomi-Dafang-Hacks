@@ -85,7 +85,7 @@ rtsp_watchdog_probe(){
 		# shortcut: avconv takes RTSP auth in URL arguments; replace if untrusted local users are added.
 		url="rtsp://$USERNAME:$USERPASSWORD@127.0.0.1:$PORT/unicast"
 	fi
-	timeout "$RTSPWATCHDOG_TIMEOUT" "$RTSPWATCHDOG_AVCONV" -loglevel error -rtsp_transport tcp -i "$url" -vframes 1 -f image2 -y "$RTSPWATCHDOG_OUTPUT" >/dev/null 2>&1 || {
+	timeout "$RTSPWATCHDOG_TIMEOUT" "$RTSPWATCHDOG_AVCONV" -loglevel error -rtsp_transport tcp -i "$url" -map 0:v:0 -c:v copy -vframes 1 -f h264 -y "$RTSPWATCHDOG_OUTPUT" >/dev/null 2>&1 || {
 		rm -f "$RTSPWATCHDOG_OUTPUT"
 		return 1
 	}

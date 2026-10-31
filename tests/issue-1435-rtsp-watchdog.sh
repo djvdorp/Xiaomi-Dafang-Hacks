@@ -6,7 +6,12 @@ tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT HUP INT TERM
 mkdir "$tmpdir/bin" "$tmpdir/paths with spaces"
 . "$repo_root/firmware_mod/config/rtspserver.conf.dist"
-[ "$RTSPWATCHDOG" = true ]
+[ "$RTSPWATCHDOG" = false ]
+[ "$RTSPWATCHDOG_INTERVAL" = 60 ]
+[ "$RTSPWATCHDOG_TIMEOUT" = 15 ]
+[ "$RTSPWATCHDOG_MAX_RESTARTS" = 3 ]
+grep -Fq 'RTSPWATCHDOG=${RTSPWATCHDOG:-false}' "$repo_root/firmware_mod/controlscripts/rtsp"
+RTSPWATCHDOG=true
 [ "$RTSPWATCHDOG_INTERVAL" = 60 ]
 [ "$RTSPWATCHDOG_TIMEOUT" = 15 ]
 [ "$RTSPWATCHDOG_MAX_RESTARTS" = 3 ]
@@ -34,6 +39,10 @@ for output do :; done
 case "$*" in
   *"rtsp://test-user:test-pass@127.0.0.1:8554/unicast"*) touch "$AUTH_SEEN" ;;
   *) exit 20 ;;
+esac
+case "$*" in
+  *"-map 0:v:0 -c:v copy"*"-f h264"*) ;;
+  *) exit 21 ;;
 esac
 case "$AVCONV_MODE" in
   success) echo frame > "$output" ;;
@@ -67,7 +76,7 @@ AUTH_SEEN="$tmpdir/auth.seen"
 CONTROL_LOG="$tmpdir/control.log"
 BINARY_LOG="$tmpdir/binary.log"
 SERVER_ALIVE="$tmpdir/server.alive"
-RTSPWATCHDOG_OUTPUT="$tmpdir/paths with spaces/frame.jpg"
+RTSPWATCHDOG_OUTPUT="$tmpdir/paths with spaces/frame.h264"
 RTSPWATCHDOG_AVCONV="$tmpdir/bin/avconv"
 RTSPWATCHDOG_BINARY="$tmpdir/bin/rtsp-binary"
 RTSPWATCHDOG_CONTROL="$tmpdir/bin/rtsp-control"

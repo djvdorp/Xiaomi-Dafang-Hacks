@@ -58,10 +58,10 @@ defaulting to the current binary. The newer MIPS/uClibc candidate and any
 required live555 libraries will be staged under separate names. The script
 will record the selected binary and driver mode in its log.
 
-The RTSP control script will gain a bounded video-health recovery loop using
-the existing local camera tools. It will restart only the RTSP process after a
-confirmed video stall, with a cooldown and retry limit; it will not reboot the
-camera or touch Wi-Fi automatically.
+The RTSP control script will provide a bounded recovery loop using the
+existing local camera tools. It stays disabled by default until the selected
+camera's probe succeeds on a healthy stream; when enabled, it restarts only the
+RTSP process with a retry limit and never reboots the camera or changes Wi-Fi.
 
 ## Verification
 
@@ -72,9 +72,9 @@ camera or touch Wi-Fi automatically.
   new scheduler/SDIO errors.
 - RTSP: run stock and candidate binaries at `1280x720` and `960x540`, decode
   frames for at least 10 minutes per combination, and record time-to-stall.
-- Recovery: induce or wait for a stall, verify the process restarts and video
-  resumes without rebooting, then verify the retry limit prevents a restart
-  loop.
+- Recovery: verify the probe against a healthy live stream before enabling it;
+  if the camera tool cannot validate healthy video, keep recovery disabled by
+  default and record the hardware limitation.
 
 ## Open implementation calls
 

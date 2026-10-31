@@ -62,6 +62,22 @@ load_wifi_driver(){
 	return 1
 }
 
+select_rtsp_binary(){
+	local requested_binary="$1"
+	local requested_libdir="$2"
+	local stock_binary="$3"
+	local stock_libdir="$4"
+
+	if [ -x "$requested_binary" ] && [ -d "$requested_libdir" ]; then
+		RTSP_BINARY="$requested_binary"
+		RTSP_LIBDIR="$requested_libdir"
+	else
+		RTSP_BINARY="$stock_binary"
+		RTSP_LIBDIR="$stock_libdir"
+	fi
+	[ -x "$RTSP_BINARY" ] && [ -d "$RTSP_LIBDIR" ]
+}
+
 # Initialize  gpio pin
 init_gpio(){
   GPIOPIN=$1

@@ -2,13 +2,19 @@
 PIDFILE="/run/rtsp.pid"
 LOGDIR="/tmp"
 LOGPATH="$LOGDIR/v4l2rtspserver-master.log"
-export LD_LIBRARY_PATH='/system/sdcard/lib:/thirdlib:/system/lib'
+STOCK_RTSP_BINARY="/system/sdcard/bin/v4l2rtspserver-master"
+STOCK_RTSP_LIBDIR="/system/sdcard/lib"
+RTSP_SELECTION_LOG="/system/sdcard/log/startup.log"
+export LD_LIBRARY_PATH="$STOCK_RTSP_LIBDIR:/thirdlib:/system/lib"
+. /system/sdcard/scripts/common_functions.sh
 if [ ! -f /system/sdcard/config/rtspserver.conf ]; then
   cp /system/sdcard/config/rtspserver.conf.dist /system/sdcard/config/rtspserver.conf
 fi
 if [ -f /system/sdcard/config/rtspserver.conf ]; then
   . /system/sdcard/config/rtspserver.conf
 fi
+RTSP_BINARY=${RTSP_BINARY:-$STOCK_RTSP_BINARY}
+RTSP_LIBDIR=${RTSP_LIBDIR:-$STOCK_RTSP_LIBDIR}
 
 if [ "$LOG" != true ] ; then
   LOGPATH="/dev/null"
@@ -35,6 +41,17 @@ start()
   if [ "$(status)" != "" ]; then
 	echo "A v4l2rtspserver is already running, please stop it or reboot"
   else
+	requested_binary="$RTSP_BINARY"
+	requested_libdir="$RTSP_LIBDIR"
+	if ! select_rtsp_binary "$requested_binary" "$requested_libdir" "$STOCK_RTSP_BINARY" "$STOCK_RTSP_LIBDIR"; then
+		echo "RTSP: no executable server and library directory available" >> "$LOGPATH"
+		return 1
+	fi
+	if [ "$RTSP_BINARY" != "$requested_binary" ] || [ "$RTSP_LIBDIR" != "$requested_libdir" ]; then
+		[ ! -d /system/sdcard/log ] || echo "RTSP: requested server unavailable; falling back to stock" >> "$RTSP_SELECTION_LOG"
+	fi
+	export LD_LIBRARY_PATH="$RTSP_LIBDIR:/thirdlib:/system/lib"
+	[ ! -d /system/sdcard/log ] || echo "RTSP: selected $RTSP_BINARY (libraries $RTSP_LIBDIR)" >> "$RTSP_SELECTION_LOG"
 	echo "Starting v4l2rtspserver-master"
 
 	## Configure OSD
@@ -92,8 +109,8 @@ start()
         /system/sdcard/bin/setconf -k f -v 0
 	fi
 	echo "================== START ===============" >> "$LOGPATH"
-	echo "/system/sdcard/bin/v4l2rtspserver-master -f$CODEC $RTSPOPTS  $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST" >> "$LOGPATH"
-	/system/sdcard/bin/v4l2rtspserver-master -f$CODEC $RTSPOPTS  $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST 2>> "$LOGPATH" >> "$LOGPATH" &
+	echo "$RTSP_BINARY -f$CODEC $RTSPOPTS  $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST" >> "$LOGPATH"
+	"$RTSP_BINARY" -f$CODEC $RTSPOPTS  $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST 2>> "$LOGPATH" >> "$LOGPATH" &
 	echo "$!" > "$PIDFILE"
   fi
 }

@@ -13,6 +13,10 @@ LOGPATH="$LOGDIR/v4l2rtspserver-master.log"
 
 PORT=8554
 
+# RTSP executable and library directory (leave stock values unless testing a staged candidate)
+RTSP_BINARY="/system/sdcard/bin/v4l2rtspserver-master"
+RTSP_LIBDIR="/system/sdcard/lib"
+
 USERNAME=
 USERPASSWORD=
 

@@ -1,5 +1,6 @@
 #!/bin/sh
 PIDFILE="/run/rtsp.pid"
+RTSP_STARTTIME_FILE="/run/rtsp.starttime"
 LOGDIR="/tmp"
 LOGPATH="$LOGDIR/v4l2rtspserver-master.log"
 STOCK_RTSP_BINARY="/system/sdcard/bin/v4l2rtspserver-master"
@@ -126,8 +127,11 @@ start()
 	fi
 	echo "================== START ===============" >> "$LOGPATH"
 	echo "$RTSP_BINARY -f$CODEC $RTSPOPTS  $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST" >> "$LOGPATH"
-	"$RTSP_BINARY" -f$CODEC $RTSPOPTS  $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST 2>> "$LOGPATH" >> "$LOGPATH" &
-	echo "$!" > "$PIDFILE"
+	if ! rtsp_start_server "$requested_binary" "$requested_libdir" "$STOCK_RTSP_BINARY" "$STOCK_RTSP_LIBDIR" "$PIDFILE" "$LOGPATH" "$RTSP_SELECTION_LOG" -f"$CODEC" $RTSPOPTS $AUDIOPARAM $VIDEOFORMAT $CREDENTIAL $PORT $MULTICASTDEST; then
+		echo "RTSP: selected server exited during startup" >> "$LOGPATH"
+		return 1
+	fi
+	export LD_LIBRARY_PATH="$RTSP_LIBDIR:/thirdlib:/system/lib"
 	start_watchdog
   fi
 }
@@ -163,12 +167,13 @@ stop()
 	kill "$pid"
 	rm "$PIDFILE" 1> /dev/null 2>&1
   fi
+  rm -f "$RTSP_STARTTIME_FILE"
 }
 
 if [ $# -eq 0 ]; then
   start
 else
-  case $1 in start|stop|status|watchdog)
+  case $1 in start|stop|status|watchdog|stop_dependents)
 	$1
 	;;
   esac

@@ -78,6 +78,71 @@ select_rtsp_binary(){
 	[ -x "$RTSP_BINARY" ] && [ -d "$RTSP_LIBDIR" ]
 }
 
+rtsp_process_info(){
+	local stat_path info
+	stat_path="${RTSP_PROC_ROOT:-/proc}/$1/stat"
+	[ -r "$stat_path" ] || return 1
+	info=$(sed 's/.*) //' "$stat_path" | awk '{print $1, $20}') || return 1
+	set -- $info
+	[ "$#" -eq 2 ] || return 1
+	RTSP_PROCESS_STATE="$1"
+	RTSP_PROCESS_START_TIME="$2"
+	case "$RTSP_PROCESS_START_TIME" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+rtsp_clear_pidfiles(){
+	rm -f "$1"
+	[ -z "${RTSP_STARTTIME_FILE:-}" ] || rm -f "$RTSP_STARTTIME_FILE"
+}
+
+rtsp_start_attempt(){
+	local binary="$1" libdir="$2" pidfile="$3" logpath="$4" server_pid start_time
+	shift 4
+	LD_LIBRARY_PATH="$libdir:/thirdlib:/system/lib" "$binary" "$@" 2>>"$logpath" >>"$logpath" &
+	server_pid=$!
+	sleep 1
+	if [ -r "${RTSP_PROC_ROOT:-/proc}/$server_pid/stat" ]; then
+		rtsp_process_info "$server_pid" && [ "$RTSP_PROCESS_STATE" != Z ] || {
+			wait "$server_pid" 2>/dev/null || true
+			rtsp_clear_pidfiles "$pidfile"
+			return 1
+		}
+		start_time="$RTSP_PROCESS_START_TIME"
+	elif [ -n "${RTSP_PROC_ROOT:-}" ] || ! kill -0 "$server_pid" 2>/dev/null; then
+		wait "$server_pid" 2>/dev/null || true
+		rtsp_clear_pidfiles "$pidfile"
+		return 1
+	fi
+	echo "$server_pid" > "$pidfile"
+	if [ -n "${RTSP_STARTTIME_FILE:-}" ]; then
+		if [ -z "$start_time" ]; then
+			echo "RTSP: process start time unavailable; watchdog will not signal this PID" >> "$logpath"
+		elif ! echo "$start_time" > "$RTSP_STARTTIME_FILE" 2>/dev/null; then
+			echo "RTSP: cannot save process start time; watchdog will not signal this PID" >> "$logpath"
+		fi
+	fi
+	return 0
+}
+
+rtsp_start_server(){
+	local requested_binary="$1" requested_libdir="$2" stock_binary="$3" stock_libdir="$4"
+	local pidfile="$5" logpath="$6" selection_log="$7" selected_binary
+	shift 7
+	rtsp_clear_pidfiles "$pidfile"
+	if ! select_rtsp_binary "$requested_binary" "$requested_libdir" "$stock_binary" "$stock_libdir"; then
+		return 1
+	fi
+	selected_binary="$RTSP_BINARY"
+	if rtsp_start_attempt "$RTSP_BINARY" "$RTSP_LIBDIR" "$pidfile" "$logpath" "$@"; then
+		return 0
+	fi
+	[ "$selected_binary" = "$stock_binary" ] && return 1
+	echo "RTSP: candidate server exited; falling back to stock" >> "$selection_log"
+	RTSP_BINARY="$stock_binary"
+	RTSP_LIBDIR="$stock_libdir"
+	rtsp_start_attempt "$RTSP_BINARY" "$RTSP_LIBDIR" "$pidfile" "$logpath" "$@"
+}
+
 rtsp_watchdog_probe(){
 	local url="rtsp://127.0.0.1:$PORT/unicast"
 	rm -f "$RTSPWATCHDOG_OUTPUT"
@@ -98,24 +163,60 @@ rtsp_watchdog_probe(){
 }
 
 rtsp_watchdog_restart(){
-	local server_pid attempts
+	local server_pid attempts expected_start_time dependents_stopped
+	dependents_stopped=false
 	server_pid=$(cat "$RTSP_PIDFILE" 2>/dev/null)
+	case "$server_pid" in ''|*[!0-9]*)
+		[ -z "$server_pid" ] || echo "RTSP watchdog: invalid PID file; not signaling '$server_pid'" >> "$RTSPWATCHDOG_LOG"
+		rtsp_clear_pidfiles "$RTSP_PIDFILE"
+		server_pid=
+		;;
+	esac
 	if [ -n "$server_pid" ] && kill -0 "$server_pid" 2>/dev/null; then
-		kill "$server_pid" 2>/dev/null || true
-		attempts=0
-		while kill -0 "$server_pid" 2>/dev/null; do
-			if [ "$attempts" -ge 5 ]; then
-				echo "RTSP watchdog: PID $server_pid did not stop; skipping restart" >> "$RTSPWATCHDOG_LOG"
-				return 1
+		expected_start_time=$(cat "${RTSP_STARTTIME_FILE:-/dev/null}" 2>/dev/null)
+		if [ -z "$expected_start_time" ] || ! rtsp_process_info "$server_pid"; then
+			echo "RTSP watchdog: cannot verify PID $server_pid identity; skipping restart" >> "$RTSPWATCHDOG_LOG"
+			return 1
+		fi
+		if [ "$RTSP_PROCESS_START_TIME" != "$expected_start_time" ]; then
+			echo "RTSP watchdog: PID $server_pid was reused; not signaling it" >> "$RTSPWATCHDOG_LOG"
+			rtsp_clear_pidfiles "$RTSP_PIDFILE"
+		elif [ "$RTSP_PROCESS_STATE" = Z ]; then
+			rtsp_clear_pidfiles "$RTSP_PIDFILE"
+		else
+			"$RTSPWATCHDOG_CONTROL" stop_dependents >> "$RTSPWATCHDOG_LOG" 2>&1 || return 1
+			dependents_stopped=true
+			if rtsp_process_info "$server_pid" && [ "$RTSP_PROCESS_START_TIME" = "$expected_start_time" ] && [ "$RTSP_PROCESS_STATE" != Z ]; then
+				kill "$server_pid" 2>/dev/null || true
+				attempts=0
+				while kill -0 "$server_pid" 2>/dev/null; do
+					if ! rtsp_process_info "$server_pid" || [ "$RTSP_PROCESS_START_TIME" != "$expected_start_time" ] || [ "$RTSP_PROCESS_STATE" = Z ]; then
+						break
+					fi
+					if [ "$attempts" -ge 5 ]; then
+						echo "RTSP watchdog: PID $server_pid did not stop; skipping restart" >> "$RTSPWATCHDOG_LOG"
+						return 1
+					fi
+					sleep 1
+					attempts=$((attempts + 1))
+				done
+			else
+				echo "RTSP watchdog: PID $server_pid changed before signal; not signaling it" >> "$RTSPWATCHDOG_LOG"
+				rtsp_clear_pidfiles "$RTSP_PIDFILE"
 			fi
-			sleep 1
-			attempts=$((attempts + 1))
-		done
+		fi
+	else
+		rtsp_clear_pidfiles "$RTSP_PIDFILE"
 	fi
 	if [ -n "${RTSPWATCHDOG_PIDFILE:-}" ] && [ "$(cat "$RTSPWATCHDOG_PIDFILE" 2>/dev/null)" != "$$" ]; then
 		return 0
 	fi
-	rm -f "$RTSP_PIDFILE"
+	if [ -f "$RTSP_PIDFILE" ]; then
+		rtsp_clear_pidfiles "$RTSP_PIDFILE"
+	fi
+	if [ "$dependents_stopped" != true ]; then
+		"$RTSPWATCHDOG_CONTROL" stop_dependents >> "$RTSPWATCHDOG_LOG" 2>&1 || return 1
+	fi
 	"$RTSPWATCHDOG_CONTROL" start >> "$RTSPWATCHDOG_LOG" 2>&1
 }
 

@@ -11,6 +11,7 @@ mkdir "$tmpdir/bin" "$tmpdir/paths with spaces"
 [ "$RTSPWATCHDOG_TIMEOUT" = 15 ]
 [ "$RTSPWATCHDOG_MAX_RESTARTS" = 3 ]
 grep -Fq 'RTSPWATCHDOG=${RTSPWATCHDOG:-false}' "$repo_root/firmware_mod/controlscripts/rtsp"
+grep -Fq 'case $1 in start|stop|status|watchdog|stop_dependents)' "$repo_root/firmware_mod/controlscripts/rtsp"
 RTSPWATCHDOG=true
 [ "$RTSPWATCHDOG_INTERVAL" = 60 ]
 [ "$RTSPWATCHDOG_TIMEOUT" = 15 ]
@@ -54,7 +55,10 @@ EOF
 cat > "$tmpdir/bin/rtsp-control" <<'EOF'
 #!/bin/sh
 echo "$1" >> "$CONTROL_LOG"
+[ "$1" != stop_dependents ] || [ -z "${PID_REPLACEMENT_STAT:-}" ] || cp "$PID_REPLACEMENT_STAT" "$RTSP_PROC_ROOT/1234/stat"
+[ "$1" = start ] || exit 0
 echo 4321 > "$RTSP_PIDFILE"
+echo 4321 > "$RTSP_STARTTIME_FILE"
 "$RTSPWATCHDOG_BINARY"
 EOF
 cat > "$tmpdir/bin/rtsp-binary" <<'EOF'
@@ -85,6 +89,8 @@ RTSPWATCHDOG_INTERVAL=17
 RTSPWATCHDOG_TIMEOUT=4
 RTSPWATCHDOG_MAX_RESTARTS=3
 RTSP_PIDFILE="$tmpdir/rtsp.pid"
+RTSP_STARTTIME_FILE="$tmpdir/rtsp.starttime"
+RTSP_PROC_ROOT="$tmpdir/proc"
 PORT=8554
 USERNAME=test-user
 USERPASSWORD=test-pass
@@ -95,7 +101,7 @@ WATCHDOG_PIDFILE="$tmpdir/watchdog.pid"
 CHILD_STARTED="$tmpdir/watchdog-child.started"
 export TIMEOUT_LOG SLEEP_COUNT AVCONV_COUNT AUTH_SEEN CONTROL_LOG BINARY_LOG SERVER_ALIVE
 export RTSPWATCHDOG_OUTPUT RTSPWATCHDOG_AVCONV RTSPWATCHDOG_BINARY RTSPWATCHDOG_CONTROL RTSPWATCHDOG_LOG
-export RTSPWATCHDOG_INTERVAL RTSPWATCHDOG_TIMEOUT RTSPWATCHDOG_MAX_RESTARTS RTSP_PIDFILE PORT USERNAME USERPASSWORD LOOP_LIMIT AVCONV_MODE
+export RTSPWATCHDOG_INTERVAL RTSPWATCHDOG_TIMEOUT RTSPWATCHDOG_MAX_RESTARTS RTSP_PIDFILE RTSP_STARTTIME_FILE RTSP_PROC_ROOT PORT USERNAME USERPASSWORD LOOP_LIMIT AVCONV_MODE
 export WATCHDOG_ACTIVE WATCHDOG_PIDFILE CHILD_STARTED
 . "$repo_root/firmware_mod/scripts/common_functions.sh"
 
@@ -113,8 +119,23 @@ kill() {
 }
 
 reset_case() {
-  rm -f "$TIMEOUT_LOG" "$AVCONV_COUNT" "$AUTH_SEEN" "$CONTROL_LOG" "$BINARY_LOG" "$SERVER_ALIVE" "$RTSP_PIDFILE" "$RTSPWATCHDOG_LOG" "$tmpdir/kill.log"
+  rm -f "$TIMEOUT_LOG" "$AVCONV_COUNT" "$AUTH_SEEN" "$CONTROL_LOG" "$BINARY_LOG" "$SERVER_ALIVE" "$RTSP_PIDFILE" "$RTSP_STARTTIME_FILE" "$RTSPWATCHDOG_LOG" "$tmpdir/kill.log"
+  rm -rf "$RTSP_PROC_ROOT"
   echo 0 > "$SLEEP_COUNT"
+}
+
+write_proc_stat() {
+  pid="$1"
+  starttime="$2"
+  comm="${3:-rtsp server}"
+  mkdir -p "$RTSP_PROC_ROOT/$pid"
+  printf '%s (%s) S' "$pid" "$comm" > "$RTSP_PROC_ROOT/$pid/stat"
+  field=4
+  while [ "$field" -lt 22 ]; do
+    printf ' 0' >> "$RTSP_PROC_ROOT/$pid/stat"
+    field=$((field + 1))
+  done
+  printf ' %s\n' "$starttime" >> "$RTSP_PROC_ROOT/$pid/stat"
 }
 
 count_lines() {
@@ -133,10 +154,13 @@ rtsp_watchdog_loop
 reset_case
 touch "$SERVER_ALIVE"
 echo 1234 > "$RTSP_PIDFILE"
+echo 999 > "$RTSP_STARTTIME_FILE"
+write_proc_stat 1234 999 'rtsp (candidate) server'
 AVCONV_MODE=once-empty
 LOOP_LIMIT=2
 rtsp_watchdog_loop
-[ "$(count_lines "$CONTROL_LOG")" = 1 ]
+[ "$(cat "$CONTROL_LOG")" = "stop_dependents
+start" ]
 [ "$(count_lines "$BINARY_LOG")" = 1 ]
 [ "$(count_lines "$tmpdir/kill.log")" = 1 ]
 [ "$(cat "$AVCONV_COUNT")" = 2 ]
@@ -145,14 +169,58 @@ grep -q 'video probe failed; restart 1/3' "$RTSPWATCHDOG_LOG"
 reset_case
 touch "$SERVER_ALIVE"
 echo 1234 > "$RTSP_PIDFILE"
+echo 999 > "$RTSP_STARTTIME_FILE"
+write_proc_stat 1234 999
 AVCONV_MODE=empty
 RTSPWATCHDOG_MAX_RESTARTS=1
 LOOP_LIMIT=5
 rtsp_watchdog_loop
-[ "$(count_lines "$CONTROL_LOG")" = 1 ]
+[ "$(cat "$CONTROL_LOG")" = "stop_dependents
+start" ]
 [ "$(count_lines "$BINARY_LOG")" = 1 ]
 [ "$(cat "$AVCONV_COUNT")" = 2 ]
 grep -q 'retry limit (1) reached' "$RTSPWATCHDOG_LOG"
+
+reset_case
+touch "$SERVER_ALIVE"
+echo 1234 > "$RTSP_PIDFILE"
+echo 998 > "$RTSP_STARTTIME_FILE"
+write_proc_stat 1234 999
+AVCONV_MODE=once-empty
+LOOP_LIMIT=1
+rtsp_watchdog_loop
+[ ! -e "$tmpdir/kill.log" ]
+[ "$(cat "$CONTROL_LOG")" = "stop_dependents
+start" ]
+grep -q 'PID 1234 was reused; not signaling it' "$RTSPWATCHDOG_LOG"
+
+reset_case
+touch "$SERVER_ALIVE"
+echo 1234 > "$RTSP_PIDFILE"
+echo 998 > "$RTSP_STARTTIME_FILE"
+write_proc_stat 1234 999
+cp "$RTSP_PROC_ROOT/1234/stat" "$tmpdir/replacement.stat"
+write_proc_stat 1234 998
+PID_REPLACEMENT_STAT="$tmpdir/replacement.stat"
+export PID_REPLACEMENT_STAT
+AVCONV_MODE=once-empty
+LOOP_LIMIT=1
+rtsp_watchdog_loop
+unset PID_REPLACEMENT_STAT
+[ ! -e "$tmpdir/kill.log" ]
+[ "$(cat "$CONTROL_LOG")" = "stop_dependents
+start" ]
+grep -q 'PID 1234 changed before signal; not signaling it' "$RTSPWATCHDOG_LOG"
+
+reset_case
+touch "$SERVER_ALIVE"
+echo 1234 > "$RTSP_PIDFILE"
+AVCONV_MODE=once-empty
+LOOP_LIMIT=1
+rtsp_watchdog_loop
+[ ! -e "$tmpdir/kill.log" ]
+[ ! -e "$CONTROL_LOG" ]
+grep -q 'cannot verify PID 1234 identity; skipping restart' "$RTSPWATCHDOG_LOG"
 
 reset_case
 RTSPWATCHDOG_PIDFILE="$WATCHDOG_PIDFILE"

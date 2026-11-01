@@ -20,13 +20,30 @@ fi
 if [ -z "${CODEC+x}" ]; then
     CODEC="H264"
 fi
+# Configs from before the rtsp-h264/rtsp-mjpeg merge only set RTSPH264OPTS
+if [ -z "$RTSPOPTS" ] && [ -n "$RTSPH264OPTS" ]; then
+    RTSPOPTS="$RTSPH264OPTS"
+fi
+
+# Find the running server by process name, not by the pidfile: the pidfile can
+# be stale or belong to another launcher, and a second server started next to
+# a running one competes for the same encoder.
+server_pid()
+{
+  set -- $(pidof v4l2rtspserver-master 2>/dev/null)
+  [ -n "$1" ] && echo "$1"
+}
 
 status()
 {
-  pid="$(cat "$PIDFILE" 2>/dev/null)"
+  pid="$(server_pid)"
   if [ "$pid" ]; then
+	echo "$pid" > "$PIDFILE"
 	# Prints PID: $pid if exists and returns 0(no error) else returns 1(error condition)
-	kill -0 "$pid" >/dev/null && echo "PID: $pid" || return 1
+	echo "PID: $pid"
+  else
+	rm -f "$PIDFILE"
+	return 1
   fi
 }
 
@@ -106,12 +123,23 @@ stop_dependents()
 
 stop()
 {
-  pid="$(cat "$PIDFILE" 2>/dev/null)"
-  if [ "$pid" ]; then
+  pids="$(pidof v4l2rtspserver-master 2>/dev/null)"
+  if [ "$pids" ]; then
 	stop_dependents
-	kill "$pid"
-	rm "$PIDFILE" 1> /dev/null 2>&1
+	kill $pids
+	# Wait for exit so an immediate start (e.g. from the web UI) does not
+	# find the old server still running, or race it for the encoder.
+	i=0
+	while [ "$(pidof v4l2rtspserver-master 2>/dev/null)" ] && [ $i -lt 20 ]; do
+	  sleep 1
+	  i=$((i + 1))
+	done
+	if [ "$(pidof v4l2rtspserver-master 2>/dev/null)" ]; then
+	  kill -9 $(pidof v4l2rtspserver-master) 2>/dev/null
+	  sleep 1
+	fi
   fi
+  rm -f "$PIDFILE"
 }
 
 if [ $# -eq 0 ]; then

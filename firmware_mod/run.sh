@@ -206,6 +206,20 @@ if [ -f /system/sdcard/controlscripts/configureMotion ]; then
     . /system/sdcard/controlscripts/configureMotion  2>/dev/null
 fi
 
+## Older releases had separate rtsp-h264/rtsp-mjpeg services, now merged into
+## rtsp. Leftover autostart entries would start a second server concurrently.
+for legacy in rtsp-h264 rtsp-mjpeg; do
+  if [ -f /system/sdcard/config/autostart/$legacy ]; then
+    rm /system/sdcard/config/autostart/$legacy
+    if [ ! -f /system/sdcard/config/autostart/rtsp ]; then
+      echo "#!/bin/sh" > /system/sdcard/config/autostart/rtsp
+      echo "/system/sdcard/controlscripts/rtsp" >> /system/sdcard/config/autostart/rtsp
+      chmod +x /system/sdcard/config/autostart/rtsp
+    fi
+    echo "Removed legacy autostart entry $legacy" >> $LOGPATH
+  fi
+done
+
 ## Autostart all enabled services:
 for i in /system/sdcard/config/autostart/*; do
   $i &

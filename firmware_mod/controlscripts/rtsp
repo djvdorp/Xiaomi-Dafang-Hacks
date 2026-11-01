@@ -46,11 +46,8 @@ fi
 
 status()
 {
-  pid="$(cat "$PIDFILE" 2>/dev/null)"
-  if [ "$pid" ]; then
-	# Prints PID: $pid if exists and returns 0(no error) else returns 1(error condition)
-	kill -0 "$pid" >/dev/null && echo "PID: $pid" || return 1
-  fi
+	pid="$(rtsp_reconcile_server_pid "$PIDFILE" "$RTSP_STARTTIME_FILE")" || return 1
+	echo "PID: $pid"
 }
 
 start()
@@ -161,13 +158,16 @@ watchdog()
 stop()
 {
 	stop_watchdog
-  pid="$(cat "$PIDFILE" 2>/dev/null)"
+	pid="$(rtsp_reconcile_server_pid "$PIDFILE" "$RTSP_STARTTIME_FILE")" || pid=
   if [ "$pid" ]; then
 	stop_dependents
-	kill "$pid"
-	rm "$PIDFILE" 1> /dev/null 2>&1
+	if [ -n "$(cat "$RTSP_STARTTIME_FILE" 2>/dev/null)" ] && rtsp_process_info "$pid" && [ "$RTSP_PROCESS_START_TIME" = "$(cat "$RTSP_STARTTIME_FILE" 2>/dev/null)" ] && [ "$RTSP_PROCESS_STATE" != Z ]; then
+		kill "$pid"
+	else
+		echo "RTSP: PID $pid identity changed; not signaling it" >> "$LOGPATH"
+	fi
+	rtsp_clear_pidfiles "$PIDFILE"
   fi
-  rm -f "$RTSP_STARTTIME_FILE"
 }
 
 if [ $# -eq 0 ]; then

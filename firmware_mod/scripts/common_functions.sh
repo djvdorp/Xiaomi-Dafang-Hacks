@@ -95,6 +95,29 @@ rtsp_clear_pidfiles(){
 	[ -z "${RTSP_STARTTIME_FILE:-}" ] || rm -f "$RTSP_STARTTIME_FILE"
 }
 
+rtsp_reconcile_server_pid(){
+	local pidfile="$1" starttime_file="$2" pids pid="" candidate old_start_time
+	pids=$(pidof v4l2rtspserver-master 2>/dev/null)
+	for candidate in $pids; do
+		case "$candidate" in ''|*[!0-9]*|0|1) continue ;; esac
+		[ -r "${RTSP_PROC_ROOT:-/proc}/$candidate/stat" ] || continue
+		pid="$candidate"
+		break
+	done
+	if [ -z "$pid" ]; then
+		rm -f "$pidfile" "$starttime_file"
+		return 1
+	fi
+	[ "$(cat "$pidfile" 2>/dev/null)" = "$pid" ] || echo "$pid" > "$pidfile"
+	if rtsp_process_info "$pid"; then
+		old_start_time=$(cat "$starttime_file" 2>/dev/null)
+		[ "$old_start_time" = "$RTSP_PROCESS_START_TIME" ] || echo "$RTSP_PROCESS_START_TIME" > "$starttime_file"
+	else
+		rm -f "$starttime_file"
+	fi
+	echo "$pid"
+}
+
 rtsp_start_attempt(){
 	local binary="$1" libdir="$2" pidfile="$3" logpath="$4" server_pid start_time
 	shift 4
@@ -165,7 +188,7 @@ rtsp_watchdog_probe(){
 rtsp_watchdog_restart(){
 	local server_pid attempts expected_start_time dependents_stopped
 	dependents_stopped=false
-	server_pid=$(cat "$RTSP_PIDFILE" 2>/dev/null)
+	server_pid=$(rtsp_reconcile_server_pid "$RTSP_PIDFILE" "$RTSP_STARTTIME_FILE") || server_pid=
 	case "$server_pid" in ''|*[!0-9]*)
 		[ -z "$server_pid" ] || echo "RTSP watchdog: invalid PID file; not signaling '$server_pid'" >> "$RTSPWATCHDOG_LOG"
 		rtsp_clear_pidfiles "$RTSP_PIDFILE"

@@ -22,6 +22,10 @@ printf '%s\n' "$1" >> "$TIMEOUT_LOG"
 shift
 "$@"
 EOF
+cat > "$tmpdir/bin/pidof" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$PIDOF_OUTPUT"
+EOF
 cat > "$tmpdir/bin/sleep" <<'EOF'
 #!/bin/sh
 if [ "$1" = "$RTSPWATCHDOG_INTERVAL" ]; then
@@ -70,7 +74,7 @@ cat > "$tmpdir/bin/watchdog-control" <<'EOF'
 #!/bin/sh
 touch "$CHILD_STARTED"
 EOF
-chmod +x "$tmpdir/bin/timeout" "$tmpdir/bin/sleep" "$tmpdir/bin/avconv" "$tmpdir/bin/rtsp-control" "$tmpdir/bin/rtsp-binary" "$tmpdir/bin/watchdog-control"
+chmod +x "$tmpdir/bin/timeout" "$tmpdir/bin/pidof" "$tmpdir/bin/sleep" "$tmpdir/bin/avconv" "$tmpdir/bin/rtsp-control" "$tmpdir/bin/rtsp-binary" "$tmpdir/bin/watchdog-control"
 PATH="$tmpdir/bin:$PATH"
 export PATH
 TIMEOUT_LOG="$tmpdir/timeout.log"
@@ -91,6 +95,7 @@ RTSPWATCHDOG_MAX_RESTARTS=3
 RTSP_PIDFILE="$tmpdir/rtsp.pid"
 RTSP_STARTTIME_FILE="$tmpdir/rtsp.starttime"
 RTSP_PROC_ROOT="$tmpdir/proc"
+PIDOF_OUTPUT=
 PORT=8554
 USERNAME=test-user
 USERPASSWORD=test-pass
@@ -101,7 +106,7 @@ WATCHDOG_PIDFILE="$tmpdir/watchdog.pid"
 CHILD_STARTED="$tmpdir/watchdog-child.started"
 export TIMEOUT_LOG SLEEP_COUNT AVCONV_COUNT AUTH_SEEN CONTROL_LOG BINARY_LOG SERVER_ALIVE
 export RTSPWATCHDOG_OUTPUT RTSPWATCHDOG_AVCONV RTSPWATCHDOG_BINARY RTSPWATCHDOG_CONTROL RTSPWATCHDOG_LOG
-export RTSPWATCHDOG_INTERVAL RTSPWATCHDOG_TIMEOUT RTSPWATCHDOG_MAX_RESTARTS RTSP_PIDFILE RTSP_STARTTIME_FILE RTSP_PROC_ROOT PORT USERNAME USERPASSWORD LOOP_LIMIT AVCONV_MODE
+export RTSPWATCHDOG_INTERVAL RTSPWATCHDOG_TIMEOUT RTSPWATCHDOG_MAX_RESTARTS RTSP_PIDFILE RTSP_STARTTIME_FILE RTSP_PROC_ROOT PIDOF_OUTPUT PORT USERNAME USERPASSWORD LOOP_LIMIT AVCONV_MODE
 export WATCHDOG_ACTIVE WATCHDOG_PIDFILE CHILD_STARTED
 . "$repo_root/firmware_mod/scripts/common_functions.sh"
 
@@ -153,6 +158,7 @@ rtsp_watchdog_loop
 
 reset_case
 touch "$SERVER_ALIVE"
+PIDOF_OUTPUT=1234
 echo 1234 > "$RTSP_PIDFILE"
 echo 999 > "$RTSP_STARTTIME_FILE"
 write_proc_stat 1234 999 'rtsp (candidate) server'
@@ -168,6 +174,7 @@ grep -q 'video probe failed; restart 1/3' "$RTSPWATCHDOG_LOG"
 
 reset_case
 touch "$SERVER_ALIVE"
+PIDOF_OUTPUT=1234
 echo 1234 > "$RTSP_PIDFILE"
 echo 999 > "$RTSP_STARTTIME_FILE"
 write_proc_stat 1234 999
@@ -183,19 +190,18 @@ grep -q 'retry limit (1) reached' "$RTSPWATCHDOG_LOG"
 
 reset_case
 touch "$SERVER_ALIVE"
+PIDOF_OUTPUT=
 echo 1234 > "$RTSP_PIDFILE"
-echo 998 > "$RTSP_STARTTIME_FILE"
-write_proc_stat 1234 999
 AVCONV_MODE=once-empty
 LOOP_LIMIT=1
 rtsp_watchdog_loop
 [ ! -e "$tmpdir/kill.log" ]
 [ "$(cat "$CONTROL_LOG")" = "stop_dependents
 start" ]
-grep -q 'PID 1234 was reused; not signaling it' "$RTSPWATCHDOG_LOG"
 
 reset_case
 touch "$SERVER_ALIVE"
+PIDOF_OUTPUT=1234
 echo 1234 > "$RTSP_PIDFILE"
 echo 998 > "$RTSP_STARTTIME_FILE"
 write_proc_stat 1234 999
@@ -214,7 +220,10 @@ grep -q 'PID 1234 changed before signal; not signaling it' "$RTSPWATCHDOG_LOG"
 
 reset_case
 touch "$SERVER_ALIVE"
+PIDOF_OUTPUT=1234
 echo 1234 > "$RTSP_PIDFILE"
+mkdir -p "$RTSP_PROC_ROOT/1234"
+echo malformed > "$RTSP_PROC_ROOT/1234/stat"
 AVCONV_MODE=once-empty
 LOOP_LIMIT=1
 rtsp_watchdog_loop

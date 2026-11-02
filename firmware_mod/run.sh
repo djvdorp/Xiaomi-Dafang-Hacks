@@ -95,7 +95,7 @@ if [ ! -d $CRONPERIODIC ]; then
            ${CRONPERIODIC}/monthly
   echo "Created cron periodic directories" >> $LOGPATH
 fi
-/system/sdcard/bin/busybox crond -L /system/sdcard/log/crond.log -c /system/sdcard/config/cron/crontabs
+/system/sdcard/bin/busybox crond -L /dev/null -c /system/sdcard/config/cron/crontabs
 
 ## Set Hostname
 if [ ! -f $CONFIGPATH/hostname.conf ]; then
